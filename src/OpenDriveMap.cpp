@@ -859,4 +859,168 @@ RoutingGraph OpenDriveMap::get_routing_graph() const
     return routing_graph;
 }
 
+// Nova-specific definitions below
+
+    // https://www.boost.org/doc/libs/1_81_0/libs/geometry/doc/html/geometry/spatial_indexes/rtree_examples/index_of_polygons_stored_in_vector.html
+    bgi::rtree<value, bgi::rstar<16, 4>> OpenDriveMap::generate_mesh_tree()
+    {
+        std::cout << "Start of generate_mesh_tree()" << std::endl;
+        bgi::rtree<value, bgi::rstar<16, 4>> rtree;
+
+        std::vector<std::pair<Lane, ring>> polys = get_lane_polygons(1.0, false);
+        std::printf("get_road_polygons returned %i shapes\n", polys.size());
+
+        // fill the spatial index
+        for (unsigned i = 0; i < polys.size(); ++i)
+        {
+            // calculate polygon bounding box
+            box b = bg::return_envelope<box>(polys[i].second);
+            // insert new value
+            rtree.insert(std::make_pair(b, i));
+            // std::printf("Inserting box (%f, %f)-(%f,%f)\n", b.min_corner().get<0>(), b.min_corner().get<1>(), b.max_corner().get<0>(), b.max_corner().get<1>());
+        }
+        // std::printf("End of generate_mesh_tree(), tree has %i shapes\n", rtree.size());
+        return rtree;
+    }
+
+    std::vector<std::pair<RoadObject, point>> OpenDriveMap::get_road_object_centers()
+    {
+        if (object_centers_.size() > 0)
+            return object_centers_; // No need to calculate twice.
+
+        for (Road road : get_roads())
+        {
+            for (RoadObject obj : road.get_road_objects())
+            {
+                float s = obj.s0;
+                float t = obj.t0;
+                odr::Vec3D xyz = road.get_surface_pt(s, t);
+                point pt = point(xyz[0], xyz[1]);
+                object_centers_.push_back(std::make_pair(obj, pt));
+            }
+            for (RoadSignal sig : road.get_road_signals())
+            {
+                RoadObject obj(road.id, sig.id, sig.s0, sig.t0, sig.zOffset,
+                               0.0, 0.0, sig.width, 0.1, sig.height, sig.hOffset, sig.pitch,
+                               sig.roll, sig.type, sig.name, sig.orientation, sig.subtype, sig.is_dynamic);
+                float s = obj.s0;
+                float t = obj.t0;
+                odr::Vec3D xyz = road.get_surface_pt(s, t);
+                point pt = point(xyz[0], xyz[1]);
+                object_centers_.push_back(std::make_pair(obj, pt));
+            }
+        }
+        return object_centers_;
+    }
+
+    bgi::rtree<value, bgi::rstar<16, 4>> OpenDriveMap::generate_object_tree()
+    {
+        std::cout << "Start of generate_object_tree()" << std::endl;
+        bgi::rtree<value, bgi::rstar<16, 4>> rtree;
+
+        if (object_centers_.size() < 1)
+            get_road_object_centers();
+
+        std::printf("map has %i objects\n", object_centers_.size());
+
+        // fill the spatial index
+        for (unsigned i = 0; i < object_centers_.size(); ++i)
+        {
+            // calculate polygon bounding box
+            box b = bg::return_envelope<box>(object_centers_[i].second);
+            // insert new value
+            rtree.insert(std::make_pair(b, i));
+            // std::printf("Inserting box (%f, %f)-(%f,%f)\n", b.min_corner().get<0>(), b.min_corner().get<1>(), b.max_corner().get<0>(), b.max_corner().get<1>());
+        }
+        // std::printf("End of generate_mesh_tree(), tree has %i shapes\n", rtree.size());
+        return rtree;
+    }
+
+    std::vector<std::pair<Lane, ring>> OpenDriveMap::get_lane_polygons(float res, bool drivable_only)
+    {
+        if (drivable_only && this->drivable_lane_polygons_ != nullptr)
+            return *this->drivable_lane_polygons_;
+        if (this->lane_polygons_ != nullptr)
+            return *this->lane_polygons_;
+
+        std::vector<std::pair<Lane, ring>> polys;
+
+        int idx = 0;
+        for (odr::Road road : this->get_roads())
+        {
+            for (odr::LaneSection lsec : road.get_lanesections())
+            {
+                for (odr::Lane lane : lsec.get_lanes())
+                {
+                    if (drivable_only && lane.type != "driving")
+                        continue;
+                    const double s_end = road.get_lanesection_end(lane.key.lanesection_s0);
+                    const double s_start = lane.key.lanesection_s0;
+
+                    std::set<double> s_vals = road.ref_line.approximate_linear(res, s_start, s_end);
+                    std::set<double> s_vals_outer_brdr = lane.outer_border.approximate_linear(res, s_start, s_end);
+                    s_vals.insert(s_vals_outer_brdr.begin(), s_vals_outer_brdr.end());
+                    std::set<double> s_vals_inner_brdr = lane.inner_border.approximate_linear(res, s_start, s_end);
+                    s_vals.insert(s_vals_inner_brdr.begin(), s_vals_inner_brdr.end());
+                    std::set<double> s_vals_lane_offset = road.lane_offset.approximate_linear(res, s_start, s_end);
+                    s_vals.insert(s_vals_lane_offset.begin(), s_vals_lane_offset.end());
+
+                    std::set<double> s_vals_lane_height = get_map_keys(lane.s_to_height_offset);
+                    s_vals.insert(s_vals_lane_height.begin(), s_vals_lane_height.end());
+
+                    const double t_max = lane.outer_border.get_max(s_start, s_end);
+                    std::set<double> s_vals_superelev = road.superelevation.approximate_linear(std::atan(res / std::abs(t_max)), s_start, s_end);
+                    s_vals.insert(s_vals_superelev.begin(), s_vals_superelev.end());
+
+                    /* thin out s_vals array, be removing s vals closer than res to each other */
+                    for (auto s_iter = s_vals.begin(); s_iter != s_vals.end();)
+                    {
+                        if (std::next(s_iter) != s_vals.end() && std::next(s_iter, 2) != s_vals.end() && ((*std::next(s_iter)) - *s_iter) <= res)
+                            s_iter = std::prev(s_vals.erase(std::next(s_iter)));
+                        else
+                            s_iter++;
+                    }
+
+                    std::vector<odr::point> outer_pts;
+                    std::vector<odr::point> inner_pts;
+
+                    odr::ring lane_ring;
+
+                    point start_pt;
+                    bool start_pt_added = false;
+
+                    for (const double &s : s_vals)
+                    {
+                        const double t_inner_brdr = lane.inner_border.get(s);
+
+                        auto inner_border_pt = road.get_surface_pt(s, t_inner_brdr);
+
+                        bg::append(lane_ring, point(inner_border_pt[0], inner_border_pt[1]));
+                        if (!start_pt_added)
+                        {
+                            start_pt = point(inner_border_pt[0], inner_border_pt[1]);
+                            start_pt_added = true;
+                        }
+                    }
+                    for (const double &s : s_vals)
+                    {
+                        const double t_outer_brdr = lane.outer_border.get(s_end - s);
+                        auto outer_border_pt = road.get_surface_pt(s_end - s, t_outer_brdr);
+
+                        bg::append(lane_ring, point(outer_border_pt[0], outer_border_pt[1]));
+                    }
+                    bg::append(lane_ring, start_pt); // close the ring
+                    polys.push_back(std::pair<Lane, ring>(lane, lane_ring));
+                    idx++;
+                }
+            }
+        }
+
+        if (drivable_only)
+            this->drivable_lane_polygons_ = std::make_unique<std::vector<std::pair<Lane, ring>>>(polys);
+        else
+            this->lane_polygons_ = std::make_unique<std::vector<std::pair<Lane, ring>>>(polys);
+        return polys;
+    }
+
 } // namespace odr

@@ -4,3 +4,4 @@ build/
 *.pyd
 __pycache__
 pyOpenDRIVE/*.cpp
+pyOpenDRIVE/include/boost
