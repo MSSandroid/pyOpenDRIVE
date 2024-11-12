@@ -27,5 +27,7 @@ for junction in junctions:
     print(f"\t\tJunction ID: {junction.id}")
     print("\t}\n")
 print("]")
+
+odr_map.generate_mesh_tree()
     
 #roads2 = odr_map.get_roads()

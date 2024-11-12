@@ -15,7 +15,7 @@ cdef extern from "../src/Geometries/Line.cpp":
 
 from libcpp.vector cimport vector
 from libcpp.map cimport map
-from libcpp.pair cimport pair
+from libcpp.pair cimport pair as libcpp_pair
 from libcpp.string cimport string
 from libcpp cimport bool
 from libcpp.memory cimport make_shared, shared_ptr, unique_ptr
@@ -51,8 +51,8 @@ cdef extern from "OpenDriveMap.h" namespace "odr":
     # ctypedef boost_multi_polygon[polygon] multi_polygon
     # ctypedef boost_ring[point] ring
     # ctypedef boost_rstar[rstar_max, rstar_min] rstar
-    # ctypedef pair[box, unsigned] value
-    # ctypedef pair[Lane, ring] LanePair
+    # ctypedef libcpp_pair[box, unsigned] value
+    # ctypedef libcpp_pair[Lane, ring] LanePair
 
     cdef cppclass OpenDriveMap:
         OpenDriveMap(const string& xodr_file, const bool center_map, const bool with_road_objects, const bool with_lateral_profile, const bool with_lane_height, const bool abs_z_for_for_local_road_obj_outline, const bool fix_spiral_edge_cases, const bool with_road_signals) except +
@@ -78,17 +78,21 @@ cdef extern from "OpenDriveMap.h" namespace "odr":
         # unique_ptr[RoadNetworkMesh] road_mesh_
 
         # vector[ring] get_drivable_lane_polygons(float res)
-        # vector[pair[Lane, ring]] get_lane_polygons(float res, bool drivable_only)
-        # vector[pair[RoadObject, point]] get_road_object_centers()
+        # vector[libcpp_pair[Lane, ring]] get_lane_polygons(float res, bool drivable_only)
+        # vector[libcpp_pair[RoadObject, point]] get_road_object_centers()
 
-        # unique_ptr[vector[pair[Lane, ring]]] drivable_lane_polygons_
-        # unique_ptr[vector[pair[Lane, ring]]] lane_polygons_
-        # vector[pair[RoadObject, point]] object_centers_
+        # unique_ptr[vector[libcpp_pair[Lane, ring]]] drivable_lane_polygons_
+        # unique_ptr[vector[libcpp_pair[Lane, ring]]] lane_polygons_
+        # vector[libcpp_pair[RoadObject, point]] object_centers_
         # unique_ptr[vector[ring]] road_polygons_
         # unique_ptr[boost_rtree[value, rstar]] rtree_
 
 
 cdef class PyOpenDriveMap:
+    
+    cdef public list lane_polygons_
+    cdef public list drivable_lane_polygons_
+
     cdef inline OpenDriveMap* unwrap(this):
         return this.c_self.get()
 

@@ -23,6 +23,7 @@ import shapely as sh
 import math
 
 cdef class PyOpenDriveMap:
+
     def __cinit__(self, const string& xodr_file, bool center_map = False, bool with_road_objects = True, bool with_lateral_profile = True, bool with_lane_height = True, bool abs_z_for_for_local_road_obj_outline = False, bool fix_spiral_edge_cases = True, bool with_road_signals = True):
         self.c_self = make_shared[OpenDriveMap](xodr_file, center_map, with_road_objects, with_lateral_profile, with_lane_height, abs_z_for_for_local_road_obj_outline, fix_spiral_edge_cases, with_road_signals)
 
@@ -92,7 +93,7 @@ cdef class PyOpenDriveMap:
         print("Start of generate_mesh_tree()")
 
         polys = self.get_lane_polygons(1.0, False)
-        print("get_lane_polygons returned %i shapes\n" % polys.size())
+        print("get_lane_polygons returned %i shapes\n" % len(polys))
 
         boxes = []
 
@@ -104,7 +105,7 @@ cdef class PyOpenDriveMap:
             boxes.append(box)
 
         # Create RTree with max of 16 geoms/node
-        rtree = sh.STRTree(boxes, 16)
+        rtree = sh.STRtree(boxes, 16)
 
         print("End of generate_mesh_tree(), tree has %i shapes\n" % len(rtree.geometries));
         return rtree
@@ -128,18 +129,26 @@ cdef class PyOpenDriveMap:
 
                     s_vals = road.ref_line.approximate_linear(res, s_start, s_end)
                     s_vals_outer_brdr = lane.outer_border.approximate_linear(res, s_start, s_end)
-                    s_vals.extend(s_vals_outer_brdr)
+                    s_vals.update(s_vals_outer_brdr)
                     s_vals_inner_brdr = lane.inner_border.approximate_linear(res, s_start, s_end)
-                    s_vals.extend(s_vals_inner_brdr)
+                    s_vals.update(s_vals_inner_brdr)
                     s_vals_lane_offset = road.lane_offset.approximate_linear(res, s_start, s_end)
-                    s_vals.extend(s_vals_lane_offset)
+                    s_vals.update(s_vals_lane_offset)
 
                     s_vals_lane_height = lane.s_to_height_offset.keys()
-                    s_vals.extend(s_vals_lane_height)
+                    s_vals.update(s_vals_lane_height)
 
                     t_max = lane.outer_border.get_max(s_start, s_end)
-                    s_vals_superelev = road.superelevation.approximate_linear(math.atan(res / math.abs(t_max)), s_start, s_end)
-                    s_vals.extend(s_vals_superelev)
+                    if t_max != 0:
+                        s_vals_superelev = road.superelevation.approximate_linear(math.atan(res / abs(t_max)), s_start, s_end)
+                    elif res >= 0:
+                        s_vals_superelev = road.superelevation.approximate_linear(math.atan(float('inf')), s_start, s_end)
+                    else:
+                        s_vals_superelev = road.superelevation.approximate_linear(math.atan(float('-inf')), s_start, s_end)
+                    s_vals.update(s_vals_superelev)
+
+                    # make s_vals a list now so it's indexable
+                    s_vals = list(s_vals)
 
                     # thin out s_vals array, be removing s vals closer than res to each other
                     svals_idx = 1
@@ -155,21 +164,21 @@ cdef class PyOpenDriveMap:
                     start_pt_added = False
                     ring_pts = []
 
-                    for _, s in s_vals:
+                    for s in s_vals:
                         t_inner_brdr = lane.inner_border.get(s)
-                        inner_border_pt = road.get_surface_pt(s, t_inner_brdr)
-
+                        inner_border_pt = road.get_surface_pt(s, t_inner_brdr).array
+                        
                         ring_pts.append(sh.Point(inner_border_pt[0], inner_border_pt[1]))
                         if not start_pt_added:
                             start_pt = sh.Point(inner_border_pt[0], inner_border_pt[1])
                             start_pt_added = True
-                    for _, s in s_vals:
+                    for s in s_vals:
                         t_outer_brdr = lane.outer_border.get(s_end - s)
-                        outer_border_pt = road.get_surface_pt(s_end - s, t_outer_brdr)
+                        outer_border_pt = road.get_surface_pt(s_end - s, t_outer_brdr).array
 
                         ring_pts.append(sh.Point(outer_border_pt[0], outer_border_pt[1]))
                     ring_pts.append(start_pt) # close the ring
-                    lane_ring = sh.Ring(ring_pts)
+                    lane_ring = sh.LinearRing(ring_pts)
                     polys.append((lane, lane_ring))
                     idx = idx+1
 
