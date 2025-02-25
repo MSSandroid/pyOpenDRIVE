@@ -7,4 +7,4 @@ extensions = [
 ]
 
 #setup(ext_modules=cythonize(["pyOpenDRIVE/*.pyx"]))
-setup(ext_modules=cythonize(extensions))
+setup(name="pyOpenDRIVE", version="0.1", ext_modules=cythonize(extensions))
