@@ -9,3 +9,8 @@ The [pyOpenDRIVE](/pyOpenDRIVE/) directory contains the original header files, a
 
 ## Example
 An example of how this wrapper works can be found in [test.py](test.py).
+
+## Installation
+`pip install cython`
+
+`pip install .`
