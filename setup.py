@@ -3,7 +3,7 @@ from setuptools import setup, Extension
 from Cython.Build import cythonize
 
 extensions = [
-    Extension(name="pyOpenDRIVE/*", sources=["pyOpenDRIVE/*.pyx"], include_dirs=["pyOpenDRIVE/include"], extra_compile_args=["-fpermissive"])
+    Extension(name="pyOpenDRIVE/*", sources=["pyOpenDRIVE/*.pyx"], include_dirs=["pyOpenDRIVE/include"], extra_compile_args=["-fpermissive"], compiler="mingw32")
 ]
 
 #setup(ext_modules=cythonize(["pyOpenDRIVE/*.pyx"]))
